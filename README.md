@@ -2,7 +2,7 @@
 
 Les versions publiées de **PRANA, un voyage fractal en transe**, pour Mac et Android.
 
-**Page de téléchargement : https://9mp.org/prana-app**
+**Page de téléchargement : https://9mp.org/prana/**
 
 Ce dépôt ne contient que les fichiers des versions (onglet *Releases*) ; le code du jeu vit dans un autre dépôt.
 
