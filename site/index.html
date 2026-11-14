@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, height=device-height, initial-scale=1, user-scalable=no, viewport-fit=cover">
+<title>PRANA, jouer dans le navigateur</title>
+<meta name="description" content="PRANA, un voyage fractal en transe, à jouer dans le navigateur.">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="TemplateData/icon.png">
+<style>
+/* 9mp.org's fonts (SIL Open Font License, TemplateData/fonts/OFL.txt). */
+@font-face{font-family:"Science Gothic";src:url(TemplateData/fonts/science-gothic.woff2) format("woff2");font-weight:100 900;font-stretch:50% 200%;font-display:swap}
+@font-face{font-family:"Martian Mono";src:url(TemplateData/fonts/martian-mono.woff2) format("woff2");font-weight:100 800;font-stretch:75% 112.5%;font-display:swap}
+html,body{margin:0;height:100%;background:#000;overflow:hidden;overscroll-behavior:none;touch-action:none}
+#unity-canvas{position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;display:block;background:#000;outline:none}
+#loader{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px;
+  background:radial-gradient(ellipse at center,#1d1608 0%,#000 70%);color:#f4f1ea;font:13px/1.6 "Martian Mono",ui-monospace,monospace;text-align:center;transition:opacity .8s}
+#loader.done{opacity:0;pointer-events:none}
+#loader h1{margin:0;font:900 clamp(40px,10vw,88px)/1 "Science Gothic",system-ui,sans-serif;font-stretch:150%;letter-spacing:.12em;padding-left:.12em}
+#loader .tag{color:#f6c64a;letter-spacing:.24em;font-size:11px;text-transform:uppercase}
+#bar{width:min(360px,70vw);height:3px;background:#2a2620;margin-top:14px;overflow:hidden}
+#bar i{display:block;height:100%;width:0;background:#f6c64a;transition:width .2s}
+#status{color:#a19d94;min-height:1.6em}
+#loader .hint{color:#a19d94;font-size:12px;max-width:34rem}
+#loader .warn{color:#7c786f;font-size:11px;max-width:34rem}
+#loader a{color:#b9a6ff}
+#fs{position:fixed;right:12px;bottom:12px;width:40px;height:40px;border:1px solid rgba(255,255,255,.25);background:rgba(0,0,0,.35);color:#fff;
+  font-size:18px;line-height:1;cursor:pointer;opacity:.55;border-radius:6px}
+#fs:hover{opacity:1}
+:fullscreen #fs{display:none}
+</style>
+</head>
+<body>
+<canvas id="unity-canvas" tabindex="-1"></canvas>
+<div id="loader">
+  <h1>PRANA</h1>
+  <div class="tag">Un voyage fractal en transe</div>
+  <div id="bar"><i></i></div>
+  <div id="status">Chargement…</div>
+  <p class="hint">Casque conseillé. Souris pour guider l'étincelle, Espace ou clic maintenu pour respirer.
+    P : pause · M : son · F : plein écran. Au doigt : pouce gauche pour guider, pouce droit pour respirer.</p>
+  <p class="warn">Flashs lumineux et motifs rapides : déconseillé aux personnes photosensibles. · <a href="https://9mp.org/prana/">Mac, Android et infos</a></p>
+</div>
+<button id="fs" title="Plein écran" aria-label="Plein écran">⛶</button>
+<script>
+  // Unity (Emscripten) asks for the mouse lock without looking at the answer. When the browser refuses — Firefox and
+  // Safari say « The document is not focused » when the click that brings the page back (from another window, the
+  // address bar) is handled before the page has the focus — the refusal is a rejected promise nobody catches, and
+  // Unity's loader turns any uncaught error into a blocking alert (seen by Mik on 2026-11-14). The refusal itself is
+  // harmless: the game sees the mouse is not held and the next click asks again. So it is caught here, before Unity
+  // keeps a reference to these functions.
+  ["requestPointerLock", "requestFullscreen", "webkitRequestFullscreen"].forEach(function (name) {
+    var native = Element.prototype[name];
+    if (typeof native !== "function") return;
+    Element.prototype[name] = function () {
+      var r = native.apply(this, arguments);
+      if (r && typeof r.catch === "function") r.catch(function (e) { console.warn("PRANA: " + name + " refused (" + e + ")"); });
+      return r;
+    };
+  });
+</script>
+<script src="Build/Web.loader.js"></script>
+<script>
+  var canvas = document.getElementById("unity-canvas");
+  var loader = document.getElementById("loader");
+  var bar = document.querySelector("#bar i");
+  var status = document.getElementById("status");
+  var fs = document.getElementById("fs");
+
+  // Fullscreen as in every 9mp game (beatemall's recipe): F toggles it, and the first click, key or touch asks for
+  // it (a browser only grants it from a gesture; a finger gets it on lifting, so it is asked again until granted
+  // once), then turns a phone to landscape. Leaving it (Escape) is not undone: F brings it back.
+  function toggleFullscreen(force) {
+    var d = document, on = !!(d.fullscreenElement || d.webkitFullscreenElement);
+    try {
+      if (!on && force !== false) {
+        var el = d.documentElement;
+        var r = (el.requestFullscreen || el.webkitRequestFullscreen || function () {}).call(el);
+        if (r && r.catch) r.catch(function () {});
+        return r;
+      } else if (on && force !== true) {
+        var x = (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+        if (x && x.catch) x.catch(function () {});
+      }
+    } catch (e) { /* refused: the game stays in the window */ }
+  }
+  var gestured = false;
+  function onGesture(e) {
+    if (e && e.code === "KeyF") { gestured = true; return; }   // F itself toggles, below
+    if (gestured) return;
+    if (document.fullscreenElement || document.webkitFullscreenElement) { gestured = true; return; }
+    var landscape = function () {
+      gestured = true;
+      try { var o = screen.orientation; if (o && o.lock) o.lock("landscape").catch(function () {}); } catch (err) {}
+    };
+    // after the event: Unity asks for the mouse (pointer lock) in its own handlers, and a fullscreen request made
+    // first would use up the click (measured 2026-11-10: the first click then locked nothing)
+    setTimeout(function () {
+      var r = toggleFullscreen(true);
+      if (r && r.then) r.then(landscape, function () {}); else landscape();
+    }, 0);
+  }
+  window.addEventListener("keydown", function (e) {
+    if (e.code === "KeyF" && !e.repeat) toggleFullscreen();
+    onGesture(e);
+  }, true);
+  window.addEventListener("pointerdown", onGesture, true);
+  window.addEventListener("pointerup", onGesture, true);
+  fs.onclick = function () { toggleFullscreen(true); canvas.focus(); };
+  if (!document.fullscreenEnabled && !document.webkitFullscreenEnabled) fs.style.display = "none";
+  canvas.addEventListener("pointerdown", function () { canvas.focus(); });
+
+  createUnityInstance(canvas, {
+    arguments: [],
+    dataUrl: "Build/Web.data.unityweb",
+    frameworkUrl: "Build/Web.framework.js.unityweb",
+    codeUrl: "Build/Web.wasm.unityweb",
+    streamingAssetsUrl: "StreamingAssets",
+    companyName: "Mik",
+    productName: "PRANA",
+    productVersion: "1.0",
+    // The fractal is the cost: PRANA scales its own 3D resolution, the screen's density is capped.
+    devicePixelRatio: Math.min(window.devicePixelRatio || 1, 1.5),
+  }, function (progress) {
+    bar.style.width = Math.round(progress * 100) + "%";
+    status.textContent = progress < 0.9 ? "Chargement… " + Math.round(progress * 100) + " %" : "Démarrage…";
+  }).then(function (instance) {
+    window.unityInstance = instance;
+    loader.classList.add("done");
+    canvas.focus();
+  }).catch(function (message) {
+    status.style.color = "#ff6b5a";
+    status.textContent = "PRANA ne peut pas démarrer ici : " + message;
+  });
+</script>
+</body>
+</html>
